@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>WASM Loader</title>
+</head>
+<body>
+    <h1>Loading WebAssembly in Qt WebEngine Susmitha</h1>
+    </div>
+    <script>
+    let wasmMemory = new WebAssembly.Memory({ initial: 1024, maximum: 2048 });
+
+   const loadWasm = async () => {
+    console.log('WebAssembly Instantiation started');
+    const wasmFilePath = './libraw.wasm';
+          const wasiImports = {
+            wasi_snapshot_preview1: {
+              fd_write: (fd, iovs, iovs_len, result) => {
+                console.log("fd_write called");
+                // Example of how to handle iovs (i.e., the memory locations of data to be written)
+                const view = new DataView(wasmMemory.buffer); // Assuming wasmMemory is your WebAssembly memory
+                let written = 0;
+
+                for (let i = 0; i < iovs_len; i++) {
+                  const iov_ptr = iovs + i * 8;
+                  const buf = view.getUint32(iov_ptr, true);     // Get buffer pointer
+                  const len = view.getUint32(iov_ptr + 4, true); // Get buffer length
+                  const str = new TextDecoder("utf-8").decode(
+                    new Uint8Array(wasmMemory.buffer, buf, len)
+                  );
+                  written += len;
+                }
+
+                // Set the number of bytes written in the result location
+                view.setUint32(result, written, true);
+                return 0; // Success
+              },
+              fd_read: (fd, iovs, iovs_len, result) => {
+                console.log(`fd_read called with fd = ${fd} iovs = ${iovs} iovs_len =  ${iovs_len} result =  ${result}`);
+                wasiFdRead(fd, iovs, iovs_len, result);
+                console.log(`fd_read called  completed with fd = ${fd} iovs = ${iovs} iovs_len =  ${iovs_len} result =  ${result}`);
+                return 0; // Success
+              },
+              fd_close: (fd) => {
+                console.log(`fd_close called for fd: ${fd}`);
+                fdclose(fd);
+                return 0; // Mock success, you can customize behavior
+              },
+              environ_sizes_get: () => {
+                console.log(`environ_sizes_get`);
+                // Mock implementation
+                return 0; // Success
+              },
+              environ_get: (environ, environ_buf) => {
+                console.log(`environ_get`);
+                // Mock implementation
+                return 0; // Success
+              },
+              fd_seek(fd, offset, whence, result_ptr) {
+                // Convert the WASI `whence` to Node.js equival
+                console.log(`fd_seek called for fd: ${fd}, offset: ${offset}, whence: ${whence} result_ptr: ${result_ptr}`);
+                // fdseek(fd, offset, whence, result_ptr);
+                wasiFdSeek(fd, offset, whence, result_ptr);
+                console.log(`fd seek completed `);
+              },
+              // Add more functions as needed
+            },
+          };
+
+          // Implement the __cxa_throw function (basic version)
+          const throwFunction = (ptr, type, destructor) => {
+            // console.error("C++ Exception thrown:", ptr, type, destructor);
+            // throw new Error("C++ Exception"); // Example exception handling
+          };
+
+          // Implement the _emscripten_memcpy_js function
+          const emscriptenMemcpy = (dest, src, num) => {
+            const destView = new Uint8Array(wasmMemory.buffer, dest, num);
+            const srcView = new Uint8Array(wasmMemory.buffer, src, num);
+            destView.set(srcView);
+          };
+
+          // Implement the __syscall_openat function
+          const syscallOpenat = (dirfd, pathPtr, flags, mode) => {
+            const path = readStringFromMemory(pathPtr);
+            console.log(`Opening file at ${path} with flags ${flags}`);
+            // Implement your own file opening logic here, if needed
+            // For demonstration, just returning a mock file descriptor
+            return 3; // Mock file descriptor
+          };
+
+          // Implement __syscall_fcntl64
+          const syscallFcntl64 = (fd, cmd, arg) => {
+            console.log(`fcntl64 called with fd: ${fd}, cmd: ${cmd}, arg: ${arg}`);
+            // Implement your own logic here
+            return 0; // Success (mock return value)
+          };
+
+          // Implement __syscall_ioctl
+          const syscallIoctl = (fd, request, arg) => {
+            console.log(`ioctl called with fd: ${fd}, request: ${request}, arg: ${arg}`);
+            // Implement your own logic here
+            return 0; // Success (mock return value)
+          };
+
+          const syscallFstat64 = (fd, statPtr) => {
+            console.log(`fstat64 called for fd: ${fd}`);
+            return 0; // Mock success
+          };
+
+          const syscallStat64 = (pathPtr, statPtr) => {
+            console.log('pathptr = ' + pathPtr);
+            const filePath1 = readStringFromMemory(pathPtr); // Read the file path from memory
+            console.log(`stat64 called for path: "${filePath1}"`);
+            if (!filePath1) {
+              console.error('File path is null or empty!');
+              return -1; // Indicate failure
+            }
+
+            try {
+              const stats = fs.statSync(filePath1); // Synchronously check file stats
+              const HEAP32 = new Int32Array(wasmInstance.instance.exports.memory.buffer);
+              // Populate the stat structure
+              HEAP32[statPtr / 4] = stats.dev; // st_dev
+              HEAP32[(statPtr + 4) / 4] = stats.ino; // st_ino
+              HEAP32[(statPtr + 8) / 4] = stats.mode; // st_mode
+              HEAP32[(statPtr + 12) / 4] = stats.nlink; // st_nlink
+              HEAP32[(statPtr + 16) / 4] = stats.uid; // st_uid
+              HEAP32[(statPtr + 20) / 4] = stats.gid; // st_gid
+              HEAP32[(statPtr + 24) / 4] = stats.rdev; // st_rdev
+              HEAP32[(statPtr + 28) / 4] = stats.size; // st_size
+
+              return 0; // Success
+            } catch (error) {
+              console.error(`Error accessing file stats: ${error.message}`);
+              return -1; // Indicate failure
+            }
+          };
+
+
+          const syscallNewfstatat = (dirfd, pathPtr, statPtr, flags) => {
+            console.log(`newfstatat called for dirfd: ${dirfd}, path: ${pathPtr}, flags: ${flags}`);
+            return 0; // Mock success
+          };
+
+          const syscallLstat64 = (pathPtr, statPtr) => {
+            console.log(`lstat64 called for path: ${pathPtr}`);
+            return 0; // Mock success
+          };
+
+
+          const emscriptenResizeHeap = () => {
+            console.log("emscripten_resize_heap called");
+            // Logic to resize heap if necessary
+          };
+
+          const abortJs = () => {
+            console.error("abort_js called");
+            throw new Error("Aborted");
+          };
+
+          const assertFail = (exprPtr, filePtr, line, funcPtr) => {
+            const expr = readStringFromMemory(exprPtr);
+            const file = readStringFromMemory(filePtr);
+            console.error(`Assertion failed: ${expr} in ${file} at line ${line}`);
+            throw new Error("Assertion Failed");
+          };
+
+          const mktimeJs = () => {
+            console.log("_mktime_js called");
+            return 0; // Mock return value
+          };
+
+          const localtimeJs = () => {
+            console.log("_localtime_js called");
+            return 0; // Mock return value
+          };
+
+          const imports = {
+            ...wasiImports,
+            env: {
+              memory: wasmMemory,
+              // memory: new WebAssembly.Memory({ initial: 256, maximum: 256 }),
+              abort: () => console.log('Abort!'),
+              // Add the invoke_ii function
+              invoke_ii: (index, arg) => {
+                const func = table.get(index);
+                return func(arg);
+              },
+              invoke_iii: (index, arg1, arg2) => {
+                const func = table.get(index);
+                return func(arg1, arg2);
+              },
+
+              // Add exception handling function
+              __cxa_find_matching_catch_3: (catchType, thrownType, exceptionPtr) => {
+                console.log(`C++ exception caught: catchType: ${catchType}, thrownType: ${thrownType}, exceptionPtr: ${exceptionPtr}`);
+                return 0; // Modify this based on your error handling logic
+              },
+              llvm_eh_typeid_for: (typeInfo) => {
+                console.log(`Type ID requested for: ${typeInfo}`);
+                return typeInfo; // Return the typeInfo or modify as needed
+              },
+              __cxa_begin_catch: (exceptionPtr) => {
+                console.log(`C++ exception begin catch for pointer: ${exceptionPtr}`);
+                return exceptionPtr; // Return the exception pointer, modify as needed
+              },
+              __cxa_end_catch: () => {
+                console.log(`C++ exception end catch`);
+                // Implement cleanup logic if necessary
+              },
+              __resumeException: (exceptionPtr) => {
+                console.log(`Resuming exception with pointer: ${exceptionPtr}`);
+                // Implement your exception handling logic here
+                return exceptionPtr; // Modify as needed
+              },
+              // Function to invoke a function with four parameters
+              invoke_iiii: (index, arg1, arg2, arg3) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3);
+              },
+              __cxa_find_matching_catch_2: (thrownType, catchType) => {
+                console.log(`Finding matching catch for type: ${thrownType}, catch: ${catchType}`);
+                return 0; // Modify as needed
+              },
+              invoke_vii: (index, arg) => {
+                console.log("invoke_vii");
+                const func = table.get(index);
+
+                return func(arg);
+              },
+              invoke_vi: (index, arg1) => {
+                console.log("invoke_vii");
+                const func = table.get(index);
+                return func(arg1);
+              },
+              invoke_v: (index) => {
+                console.log("invoke_vii");
+                const func = table.get(index);
+                return func();
+              },
+              __cxa_rethrow: () => {
+                console.log(`Re-throwing exception`);
+              },
+              invoke_iiiiiii: (index, arg1, arg2, arg3, arg4, arg5, arg6) => {
+                console.log("invoke_vii");
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4, arg5, arg6);
+              },
+              invoke_viiii: (index, arg1, arg2, arg3, arg4) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4);
+              },
+              __cxa_uncaught_exceptions: () => {
+                console.log(`Uncaught exceptions`);
+                return 0; // Modify as needed
+              },
+              invoke_iiiii: (index, arg1, arg2, arg3, arg4) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4);
+              },
+              invoke_iiiiii: (index, arg1, arg2, arg3, arg4, arg5) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4, arg5);
+              },
+              invoke_viii: (index, arg1, arg2) => {
+                const func = table.get(index);
+                return func(arg1, arg2);
+              },
+              invoke_iiiiiiii: (index, arg1, arg2, arg3, arg4, arg5, arg6, arg7) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+              },
+              invoke_iiiiiiiiiii: (index, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10);
+              },
+              invoke_fiii: (index, arg1, arg2, arg3) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3);
+              },
+              invoke_diii: (index, arg1, arg2, arg3) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3);
+              },
+              invoke_i: (index) => {
+                const func = table.get(index);
+                return func();
+              },
+              invoke_iiiiiiiiiiiii: (index, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15);
+              },
+              invoke_viiiiiii: (index, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12);
+              },
+              invoke_iiiiiiiiiiii: (index, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14);
+              },
+
+              invoke_viiiiiiiiii: (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12);
+              },
+              invoke_viiiiiiiiiiiiiii: (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15);
+              },
+              invoke_jiiii: (arg1, arg2, arg3, arg4) => {
+                const func = table.get(index);
+                return func(arg1, arg2, arg3, arg4);
+              },
+
+              __malloc: (size) => wasmInstance.instance.exports.__malloc(size), // Provide malloc
+              __free: (ptr) => wasmInstance.instance.exports.__free(ptr), // Provide free
+              __cxa_throw: throwFunction, // Add the __cxa_throw function
+              _emscripten_memcpy_js: emscriptenMemcpy, // Add the _emscripten_memcpy_js function
+              __syscall_openat: syscallOpenat, // Add __syscall_openat implementation
+              __syscall_fcntl64: syscallFcntl64, // Add __syscall_fcntl64 implementation
+              __syscall_ioctl: syscallIoctl, // Add __syscall_ioctl implementation
+              _tzset_js: () => {
+                console.log("_tzset_js called");
+                // Implement timezone setup if necessary
+              },
+              __syscall_fstat64: syscallFstat64,
+              __syscall_stat64: syscallStat64,
+              __syscall_newfstatat: syscallNewfstatat,
+              __syscall_lstat64: syscallLstat64,
+              emscripten_resize_heap: emscriptenResizeHeap,
+              _abort_js: abortJs,
+              __assert_fail: assertFail,
+              _mktime_js: mktimeJs,
+              _localtime_js: localtimeJs,
+              emscripten_resize_heap: emscriptenResizeHeap,
+              _abort_js: abortJs,
+              __assert_fail: assertFail,
+              _mktime_js: mktimeJs,
+              _localtime_js: localtimeJs,
+            }
+          };
+
+fetch(wasmFilePath)
+    .then(response => response.arrayBuffer())
+    .then(buffer => WebAssembly.instantiate(new Uint8Array(buffer), imports))
+    .then(wasmModule => {
+        console.log("WASM Module loaded and instantiated.");
+        const { instance } = wasmModule;
+        // You can now access WebAssembly functions
+        console.log(instance.exports);
+            fetch('Doors.NEF').then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.arrayBuffer(); // Read the response as an ArrayBuffer
+                })
+                .then(buffer => {
+                // The buffer is an ArrayBuffer, you can get its byteLength directly
+                        const dataLength = buffer.byteLength; // Get the length in bytes
+                        console.log('File buffer:'+buffer);
+                        console.log('dataLength:'+ dataLength);
+                        const dataPtr = instance.exports.malloc(dataLength + 1);
+
+                        // Check if memory is available
+                        if (instance.exports.memory) {
+                          const memory = instance.exports.memory;
+                          if (memory) {
+                            console.log('Memory size:', memory.buffer.byteLength); // Check the size of memory
+                          } else {
+                            console.error('Memory is not available');
+                          }
+                        }
+                        const HEAPU8 = new Uint8Array(instance.exports.memory.buffer); // Create HEAPU8 manually if needed
+                        // console.log(wasmInstance.instance.exports.memory.buffer);
+                        // Copy the RAW buffer to the WebAssembly heap
+                        HEAPU8.set(new Uint8Array(buffer), dataPtr);
+
+                        // Step 4: Read back and log some of the copied data for verification
+                        // console.log(`Verifying copied data...`);
+                        // for (let i = 0; i < Math.min(dataLength, 16); i++) { // Limit to the first 16 bytes for logging
+                        //   const value = HEAPU8[dataPtr + i];
+                        //   console.log(`Byte ${i}: ${value}`);
+                        // }
+
+                        if (!dataPtr) {
+                          console.error('Failed to allocate memory in WebAssembly');
+                          return;
+                        }
+
+                        console.log('Data copied to WebAssembly memory successfully.');
+
+
+                        const lrptr = instance.exports.libraw_init(0);
+
+                        try {
+                          const result = instance.exports.libraw_open_buffer(lrptr, dataPtr, dataLength);
+                          if (result !== 0) {
+                            console.error('Error in libraw_open_buffer:', result);
+                            return;
+                          }
+                        } catch (err) {
+                          console.error('Exception thrown in libraw_open_buffer:', err);
+                        }
+
+                        console.log('RAW image opened successfully with LibRaw');
+
+// Process the RAW image to RGBdata
+    try {
+      console.log('RAW image Unpacking started');
+      const result = instance.exports.libraw_unpack(lrptr);
+      if (result !== 0) {
+        console.error('Error in libraw_unpack:', result);
+        return;
+      }
+    } catch (err) {
+      console.error('Exception thrown in libraw_unpack:', err);
+    }
+
+
+    try {
+      const result = instance.exports.libraw_dcraw_process(lrptr);
+      if (result !== 0) {
+        console.error('Error in libraw_dcraw_process:', result);
+        return;
+      }
+    } catch (err) {
+      console.error('Exception thrown in libraw_dcraw_process:', err);
+    }
+
+    // Get the processed image data
+    const processedImagePtr = instance.exports.libraw_dcraw_make_mem_image(lrptr);
+
+    console.log(`lrptr: ${lrptr}`);
+
+    console.log(`processedImage: ${processedImagePtr}`);
+
+    // Check if the image processing was successful
+    if (processedImagePtr === 0) {
+      console.error('Failed to process RAW image');
+      return;
+    }
+
+    const memory = instance.exports.memory;
+
+    const processedImageOffset = processedImagePtr;
+    // Example offsets based on the layout
+    const type = new Uint32Array(memory.buffer, processedImageOffset + 0, 1)[0]; // 4 bytes for type
+    const height = new Uint16Array(memory.buffer, processedImageOffset + 4, 1)[0]; // 2 bytes for height
+    const width = new Uint16Array(memory.buffer, processedImageOffset + 6, 1)[0]; // 2 bytes for width
+    const colors = new Uint16Array(memory.buffer, processedImageOffset + 8, 1)[0]; // 2 bytes for colors
+    const bits = new Uint16Array(memory.buffer, processedImageOffset + 10, 1)[0]; // 2 bytes for bits
+    const dataSize = new Uint32Array(memory.buffer, processedImageOffset + 12, 1)[0]; // 4 bytes for data_size
+
+    // Access the data pointer (unsigned char data[])
+    const dataPointer = processedImageOffset + 16;
+    const rgbData = new Uint8Array(memory.buffer, dataPointer, dataSize);
+
+    // Debugging: Log the type, width, height, and data size
+     console.log("Image Type:"+ type);
+     console.log("Width:"+ width);
+     console.log("Height:"+ height);
+     console.log("Data Size:"+ dataSize);
+     console.log("colors:"+ colors);
+     console.log("bits:"+ bits);
+
+    // Validate calculated data_size
+    const calculated_data_size = height * width * colors * (bits / 8);
+    // console.log('Calculated Data Size:', calculated_data_size);
+    // console.log('Retrieved Data Size:', dataSize);
+
+// Assume width and height are available from the image processing
+const base64Image = rgbToBase64(rgbData, width, height);
+
+const imgElement = document.createElement('img');
+// Set optional attributes
+      imgElement.alt = 'My Image';   // Alt text for the image
+      imgElement.style.width = '700px'; // Example for resizing the image width
+      imgElement.style.height = 'auto'; // Maintain aspect ratio by setting height to auto
+        imgElement.src = base64Image;
+        document.body.appendChild(imgElement);
+    })
+    .catch(error => {
+                    console.error('There was a problem with the fetch operation:', error);
+                });
+    })
+    .catch(err => console.error("Error loading WASM:", err));
+    }
+
+
+// Function to convert RGB data to Base64
+function rgbToBase64(rgbData, width, height) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.createImageData(width, height);
+    imageData.data.set(rgbData);
+
+    // Fill the imageData with the RGB data
+    for (let i = 0; i < width * height; i++) {
+        const offset = i * 3; // RGB data is in 3 channels
+        imageData.data[i * 4] = rgbData[offset];       // R
+        imageData.data[i * 4 + 1] = rgbData[offset + 1]; // G
+        imageData.data[i * 4 + 2] = rgbData[offset + 2]; // B
+        imageData.data[i * 4 + 3] = 255;               // A (full opacity)
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    return canvas.toDataURL('image/png');
+}
+
+// Load the WASM module on page load
+window.onload = loadWasm;
+    </script>
+</body>
+</html>
